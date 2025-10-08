@@ -39,6 +39,12 @@ const io = socketIo(server, {
     methods: ['GET', 'POST'],
     credentials: true
   },
+  // Configurações para lidar com proxies e timeouts
+  serveClient: false, // Não servir o cliente socket.io do servidor
+  transports: ['websocket'], // Forçar o uso de WebSockets
+  pingTimeout: 60000, // Aumentar o tempo limite do ping para 60 segundos
+  pingInterval: 25000, // Enviar ping a cada 25 segundos
+  path: '/socket.io', // Caminho explícito para o socket.io
 });
 
 const prisma = new PrismaClient();
