@@ -1,0 +1,635 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mongodb"
+  url      = env("DATABASE_URL")
+}
+
+model Post {
+  id         String   @id @default(auto()) @map("_id") @db.ObjectId
+  description String
+  url        String   @unique
+  viewCount  Int      @default(0)      // Deve ser um número
+  likesCount  Int      @default(0)      // Deve ser um número
+  commentsCount Int @default(0)
+  approved   Boolean  // Deve ser um booleano
+  mediaUrls   String[] @default([])
+  failed      Boolean?  @default(false)
+  premium    Boolean @default(false)
+  created_at DateTime @default(now())
+  updated_at DateTime? @default(now())
+  userId     String?  @db.ObjectId
+  User       User?    @relation(fields: [userId], references: [id])
+  comments   Comment[]  @relation("PostComments") // Adicionando a relação com Comment
+  visitorComments VisitorComment[] // Relação com VisitorComment
+  likes      Like[]   // Relação com Like
+  CommentsCount Int? @default(0)
+  videos        Video[] 
+  photos        Photo[]        // Relação com a nova tabela Video
+  // Sistema VIP
+  paidPost PaidPost? // Relação 1:1 com PaidPost
+}
+
+model Photo {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  url       String
+  postId    String   @db.ObjectId
+  userId    String   @db.ObjectId
+  createdAt DateTime @default(now())
+  post      Post     @relation(fields: [postId], references: [id])
+  user      User     @relation(fields: [userId], references: [id], name: "UserPhotos") // Nomeado para evitar conflitos
+  @@index([postId])
+  @@index([userId])
+  @@index([createdAt])
+}
+
+model Video {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  url       String
+  postId    String   @db.ObjectId
+  userId    String   @db.ObjectId
+  createdAt DateTime @default(now())
+  post      Post     @relation(fields: [postId], references: [id])
+  user      User     @relation(fields: [userId], references: [id], name: "UserVideos") // Nomeado para evitar conflitos
+  @@index([postId])
+  @@index([userId])
+  @@index([createdAt])
+}
+
+model Comment {
+  id         String      @id @default(auto()) @map("_id") @db.ObjectId
+  postId     String      @db.ObjectId
+  userId     String?     @db.ObjectId
+  content    String
+  parentId   String?     @db.ObjectId
+  likesCount Int         @default(0)
+  createdAt  DateTime    @default(now())
+  post       Post?       @relation("PostComments", fields: [postId], references: [id])
+  user       User?       @relation(fields: [userId], references: [id])
+  parent     Comment?    @relation("CommentReplies", fields: [parentId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  replies    Comment[]   @relation("CommentReplies")
+  likes      CommentLike[]
+}
+
+model CommentLike {
+  id         String   @id @default(auto()) @map("_id") @db.ObjectId
+  commentId  String   @db.ObjectId
+  userId     String   @db.ObjectId
+  createdAt  DateTime @default(now())
+  comment    Comment  @relation(fields: [commentId], references: [id])
+  user       User     @relation(fields: [userId], references: [id])
+  @@unique([commentId, userId])
+  @@index([commentId])
+  @@index([userId])
+}
+
+model Like {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  postId    String   @db.ObjectId
+  userId    String   @db.ObjectId
+  createdAt DateTime @default(now())
+  post      Post     @relation(fields: [postId], references: [id])
+  user      User     @relation(fields: [userId], references: [id])
+
+  @@unique([postId, userId]) // Previne likes duplicados
+  @@index([postId])
+  @@index([userId])
+  @@index([createdAt])
+}
+
+model VisitorComment {
+  id         String   @id @default(auto()) @map("_id") @db.ObjectId
+  postId     String   @db.ObjectId // Referência ao post
+  username   String   // Nome do visitante
+  content    String   // Conteúdo do comentário
+  createdAt  DateTime @default(now()) // Data de criação do comentário
+  post       Post     @relation(fields: [postId], references: [id]) // Relação com Post
+}
+
+model Category {
+  id String @id @default(auto()) @map("_id") @db.ObjectId
+  name String
+  qtd Int?
+  created_at DateTime? @default(now())
+  update_at DateTime? @default(now())
+
+  userId String? @db.ObjectId
+  User User? @relation(fields: [userId], references: [id])
+}
+
+model Account {
+  id                 String  @id @default(auto()) @map("_id") @db.ObjectId
+  userId             String  @db.ObjectId
+  type               String
+  provider           String
+  providerAccountId  String  @map("provider_account_id")
+  refresh_token      String? @db.String
+  access_token       String? @db.String
+  expires_at         Int?
+  token_type         String?
+  scope              String?
+  id_token           String? @db.String
+  session_state      String?
+ 
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+ 
+  @@unique([provider, providerAccountId])
+  @@map("accounts")
+}
+ 
+model Session {
+  id           String   @id @default(auto()) @map("_id") @db.ObjectId
+  sessionToken String   @unique
+  userId       String   @db.ObjectId
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+ 
+  @@map("sessions")
+}
+ 
+model User {
+  id                String    @id @default(auto()) @map("_id") @db.ObjectId
+  name              String?
+  username          String    @unique
+  email             String    @unique
+  password          String?
+  emailVerified     DateTime? @map("email_verified")
+  image             String?
+  banner1           String?   // Campo para o primeiro banner
+  banner2           String?   // Campo para o segundo banner
+  bio               String?
+  city              String?
+  role              String?
+  state             String?
+  age               Int?
+  premium           Boolean   @default(false)
+  twitter           String?
+  instagram         String?
+  buupe             String?
+  sexlog            String?
+  privacy           String?
+  onlyfans          String?
+  signupSource      String?
+  interests         String[]  @default([])
+  fetishes          String[]  @default([])
+  objectives        String[]  @default([])
+  affiliateId       String?   @db.ObjectId
+  followersCount    Int       @default(0)
+  viewsCount        Int       @default(0)
+  recommendationsCount Int     @default(0)
+  blockedUsersCount Int       @default(0)
+  reportsReceivedCount Int    @default(0)
+  accounts          Account[]
+  sessions          Session[]
+  access            Int?
+  categories        Category[]
+  posts             Post[]
+  comments          Comment[]
+  sentMessages      Message[] @relation("SentMessages")
+  receivedMessages  Message[] @relation("ReceivedMessages")
+  followers         Follow[]  @relation("following")
+  following         Follow[]  @relation("followers")
+  chatRooms         ChatParticipant[]
+  sentChatMessages  ChatMessage[] @relation(name: "ChatMessagesSent")
+  receivedChatMessages ChatMessage[] @relation(name: "ChatMessagesReceived")
+  paymentQrCodeUrl  String?
+  paymentStatus     String?
+  paymentType       String?
+  paymentDate       DateTime?
+  preferenceId      String?
+  paymentId         Int?
+  expireDate        DateTime?
+  likes             Like[]
+  notifications   Notification[] @relation("UserNotifications")
+  payments          Payment[]
+  affiliateSales    Affiliate[] @relation("AffiliateSales")
+  referredUsers     Affiliate[] @relation("ReferredUsers")
+  withdrawalRequests WithdrawalRequest[] @relation("WithdrawalAffiliate")
+  activityLimits    UserActivityLimit[] @relation("UserActivity")
+  wallMessages      WallMessage[] @relation("WallMessages")
+  authoredWallMessages WallMessage[] @relation("AuthoredWallMessages")
+  recommendedBy     Recommendation[] @relation("RecommendedBy")
+  recommending      Recommendation[] @relation("Recommending")
+  blockedUsers      Block[] @relation("BlockedBy")
+  blockedBy         Block[] @relation("BlockedUsers")
+  reportsMade       Report[] @relation("ReportsMade")
+  reportsReceived   Report[] @relation("ReportsReceived")
+  videos            Video[] @relation(name: "UserVideos")
+  photos            Photo[] @relation(name: "UserPhotos")
+  coupleDetails   CoupleDetails? @relation("CoupleDetailsToUser")
+  coupleDetailsId String?        @db.ObjectId
+  personDetails   PersonDetails? @relation("PersonDetailsToUser", fields: [personDetailsId], references: [id])
+  personDetailsId String? @unique @db.ObjectId
+  commentLikes CommentLike[]
+  credits Int @default(0) // Saldo de créditos do usuário
+  creditTransactions CreditTransaction[] @relation("UserCreditTransactions")
+  receivedGifts Gift[] @relation("GiftReceiver")
+  sentGifts Gift[] @relation("GiftSender")
+  lastSeen DateTime? // Última vez que o usuário esteve online
+  onboardingLocationCompleted Boolean @default(false) // Flag para controlar se já passou pelo onboarding de location
+  createdAt DateTime? // Data de criação do usuário (opcional)
+  updated_at DateTime? // Data da última atualização (opcional)
+  // Sistema VIP
+  vipPlans VipPlan[] @relation("VipPlanCreator")
+  vipSubscriptions VipSubscription[] @relation("VipSubscriptionSubscriber")
+  paidPosts PaidPost[] @relation("PaidPostCreator")
+  paidPostAccesses PaidPostAccess[] @relation("PaidPostAccessUser")
+  // Sistema de Visitas
+  profileVisitors Visit[] @relation("ProfileVisitors")
+  profileVisited Visit[] @relation("ProfileVisited")
+  @@map("users")
+}
+
+model PersonDetails {
+  id                String         @id @default(auto()) @map("_id") @db.ObjectId
+  name              String?
+  age               Int?
+  sexualOrientation String?
+  profession        String?
+  maritalStatus     String?
+  zodiacSign        String?
+  ethnicity         String?
+  hair              String?
+  eyes              String?
+  height            Float?
+  bodyType          String?
+  smokes            Boolean        @default(false)
+  drinks            Boolean        @default(false)
+  coupleDetailsHim  CoupleDetails? @relation("Him")
+  coupleDetailsHer  CoupleDetails? @relation("Her")
+  user              User?          @relation("PersonDetailsToUser")
+}
+
+model CoupleDetails {
+  id              String         @id @default(auto()) @map("_id") @db.ObjectId
+  user            User?          @relation("CoupleDetailsToUser", fields: [userId], references: [id])
+  userId          String?        @unique @db.ObjectId
+  him             PersonDetails? @relation("Him", fields: [himId], references: [id])
+  himId           String?        @unique @db.ObjectId
+  her             PersonDetails? @relation("Her", fields: [herId], references: [id])
+  herId           String?        @unique @db.ObjectId
+}
+
+model Recommendation {
+  id             String   @id @default(auto()) @map("_id") @db.ObjectId
+  recommenderId  String   @db.ObjectId // User who is recommending
+  recommendedId  String   @db.ObjectId // User who is being recommended
+  createdAt      DateTime @default(now())
+
+  recommender    User     @relation("Recommending", fields: [recommenderId], references: [id])
+  recommended    User     @relation("RecommendedBy", fields: [recommendedId], references: [id])
+
+  @@unique([recommenderId, recommendedId]) // Prevents duplicate recommendations
+  @@map("recommendations")
+}
+
+model Block {
+  id           String   @id @default(auto()) @map("_id") @db.ObjectId
+  blockerId    String   @db.ObjectId // User who is blocking
+  blockedId    String   @db.ObjectId // User who is being blocked
+  createdAt    DateTime @default(now())
+
+  blocker      User     @relation("BlockedBy", fields: [blockerId], references: [id])
+  blocked      User     @relation("BlockedUsers", fields: [blockedId], references: [id])
+
+  @@unique([blockerId, blockedId]) // Prevents duplicate blocks
+  @@map("blocks")
+}
+
+model Report {
+  id           String   @id @default(auto()) @map("_id") @db.ObjectId
+  reporterId   String   @db.ObjectId // User who is reporting
+  reportedId   String   @db.ObjectId // User who is being reported
+  reason       String   // Reason for the report
+  status       String   @default("pending") // Status: pending, reviewed, resolved
+  createdAt    DateTime @default(now())
+
+  reporter     User     @relation("ReportsMade", fields: [reporterId], references: [id])
+  reported     User     @relation("ReportsReceived", fields: [reportedId], references: [id])
+
+  @@map("reports")
+}
+
+model WallMessage {
+  id         String   @id @default(auto()) @map("_id") @db.ObjectId
+  content    String
+  authorId   String   @db.ObjectId
+  profileId  String   @db.ObjectId
+  createdAt  DateTime @default(now())
+  author     User     @relation("AuthoredWallMessages", fields: [authorId], references: [id])
+  profile    User     @relation("WallMessages", fields: [profileId], references: [id])
+
+  @@index([profileId])
+}
+
+model Affiliate {
+  id           String   @id @default(auto()) @map("_id") @db.ObjectId
+  userId       String   @db.ObjectId // Usuário que comprou
+  affiliateId  String   @db.ObjectId // Usuário que indicou
+  amount       Float    // Valor da venda
+  commission   Float    // Comissão para o afiliado
+  status       String   // Status da venda (pago, pendente, etc.)
+  paymentId    Int?
+  created_at   DateTime @default(now())
+  
+  user         User     @relation(fields: [userId], references: [id], name: "AffiliateSales")
+  affiliate    User     @relation(fields: [affiliateId], references: [id], name: "ReferredUsers")
+
+  @@map("affiliates")
+}
+
+model WithdrawalRequest {
+  id           String   @id @default(auto()) @map("_id") @db.ObjectId
+  affiliateId  String   @db.ObjectId
+  amount       Float
+  status       String   // Status do saque (pendente, aprovado, rejeitado)
+  created_at   DateTime @default(now())
+
+  affiliate    User     @relation(fields: [affiliateId], references: [id], name: "WithdrawalAffiliate")
+
+  @@map("withdrawal_requests")
+}
+
+model Payment {
+  id           String   @id @default(auto()) @map("_id") @db.ObjectId
+  userId       String   @db.ObjectId
+  plan         String
+  amount       Float
+  transactionDate DateTime @default(now())
+  userEmail    String
+  status       String
+  paymentId    Int?
+  duration     Int?
+  promotionCode String?
+  preferenceId     String? @unique
+  affiliateId  String?
+
+  user      User     @relation(fields: [userId], references: [id])
+  
+  @@map("payments")
+}
+
+model PaymentSession {
+  id         String   @id @default(auto()) @map("_id") @db.ObjectId
+  plan       String
+  amount     Float
+  userId     String
+  status     String   @default("pending")
+  createdAt  DateTime @default(now())
+  expiresAt  DateTime?
+  paymentId  Int?     // Adicionar este campo para vincular ao Payment
+  preferenceId     String? @unique
+}
+
+model Message {
+  id            String   @id @default(auto()) @map("_id") @db.ObjectId
+  senderId      String   @db.ObjectId
+  receiverId    String   @db.ObjectId
+  content       String
+  timestamp     DateTime @default(now())
+  read          Boolean  @default(false)  // Marca se a mensagem foi lida
+  conversationId String?   // Identificador da conversa (a ser gerado no código)
+  medias         String[] @default([])
+  image           String?
+  sender        User     @relation("SentMessages", fields: [senderId], references: [id])
+  receiver      User     @relation("ReceivedMessages", fields: [receiverId], references: [id])
+
+  @@map("messages")
+}
+
+model Follow {
+  id          String   @id @default(auto()) @map("_id") @db.ObjectId
+  followerId  String   @db.ObjectId
+  followingId String   @db.ObjectId
+  createdAt   DateTime @default(now())
+
+  follower    User     @relation("followers", fields: [followerId], references: [id])
+  following   User     @relation("following", fields: [followingId], references: [id])
+
+  @@unique([followerId, followingId]) // Definindo índice composto para evitar duplicação
+}
+
+model ChatRoom {
+  id          String   @id @default(auto()) @map("_id") @db.ObjectId
+  name        String   @unique @default("chat-global") // Nome da sala única
+  description String?  // Descrição opcional da sala
+  createdAt   DateTime @default(now())
+
+  messages    ChatMessage[] // Mensagens da sala única
+  participants ChatParticipant[] // Todos os participantes (usuários) da sala
+}
+
+model ChatParticipant {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  userId    String   @db.ObjectId
+  roomId    String   @db.ObjectId @default("chat-global") // Sala única para todos
+  joinedAt  DateTime @default(now())
+
+  user      User     @relation(fields: [userId], references: [id])
+  room      ChatRoom @relation(fields: [roomId], references: [id])
+
+  @@unique([userId, roomId]) // Garantir que o usuário não entre várias vezes na mesma sala
+}
+
+model ChatMessage {
+  id         String   @id @default(auto()) @map("_id") @db.ObjectId
+  senderId   String   @db.ObjectId
+  receiverId String?  @db.ObjectId  // Pode ser nulo para mensagens públicas
+  roomId     String?  @db.ObjectId  // Relacionamento com a sala (opcional se for uma sala pública)
+  content    String
+  timestamp  DateTime @default(now())
+  read       Boolean  @default(false)
+
+  sender     User     @relation(fields: [senderId], references: [id], name: "ChatMessagesSent")    // Relacionamento com o usuário que envia a mensagem
+  receiver   User?    @relation(fields: [receiverId], references: [id], name: "ChatMessagesReceived") // Relacionamento com o usuário que recebe a mensagem
+  room       ChatRoom? @relation(fields: [roomId], references: [id]) // Relacionamento opcional com a sala de chat
+
+  @@map("chatMessages")
+}
+
+model VerificationToken {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  userId    String   @db.ObjectId // Reference to User model
+  token     String   @unique
+  expires   DateTime
+  @@unique([userId, token]) // Updated composite constraint
+  @@map("verificationtokens")
+}
+
+model UserActivityLimit {
+  id           String   @id @default(auto()) @map("_id") @db.ObjectId
+  userId       String   @db.ObjectId
+  date         DateTime
+  commentCount Int      @default(0)
+  messageCount Int      @default(0)
+  user         User     @relation("UserActivity", fields: [userId], references: [id])
+  
+  @@unique([userId, date])
+}
+
+model Notification {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  userId    String   @db.ObjectId // Usuário que recebe a notificação
+  type      String   // Tipo: 'follow', 'message', 'like', 'comment'
+  title     String   // Título da notificação
+  message   String   // Mensagem da notificação
+  data      Json?    // Dados adicionais (postId, commentId, etc.)
+  read      Boolean  @default(false) // Se foi lida
+  createdAt DateTime @default(now())
+  user      User     @relation("UserNotifications", fields: [userId], references: [id])
+  
+  @@index([userId])
+  @@index([type])
+  @@index([read])
+  @@index([createdAt])
+}
+
+// Sistema de Créditos e Presentes
+model CreditTransaction {
+  id          String   @id @default(auto()) @map("_id") @db.ObjectId
+  userId      String   @db.ObjectId
+  type        String   // 'purchase', 'gift_sent', 'gift_received', 'withdrawal'
+  amount      Int      // Quantidade de créditos
+  description String   // Descrição da transação
+  balance     Int      // Saldo após a transação
+  createdAt   DateTime @default(now())
+  
+  user        User     @relation("UserCreditTransactions", fields: [userId], references: [id])
+  
+  @@index([userId])
+  @@index([type])
+  @@index([createdAt])
+  @@map("credit_transactions")
+}
+
+model Gift {
+  id          String   @id @default(auto()) @map("_id") @db.ObjectId
+  senderId    String   @db.ObjectId
+  receiverId  String   @db.ObjectId
+  amount      Int      // Quantidade de créditos enviados
+  message     String?  // Mensagem opcional do presente
+  createdAt   DateTime @default(now())
+  
+  sender      User     @relation("GiftSender", fields: [senderId], references: [id])
+  receiver    User     @relation("GiftReceiver", fields: [receiverId], references: [id])
+  
+  @@index([senderId])
+  @@index([receiverId])
+  @@index([createdAt])
+  @@map("gifts")
+}
+
+// Sistema VIP - Planos VIP
+model VipPlan {
+  id          String   @id @default(auto()) @map("_id") @db.ObjectId
+  creatorId   String   @db.ObjectId
+  title       String   // Título do plano (ex: "VIP Básico", "VIP Premium")
+  description String   // Descrição do plano
+  price       Float    // Preço em reais
+  priceCredits Int     // Preço em créditos
+  duration    Int      // Duração em dias
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @default(now())
+  
+  creator     User     @relation("VipPlanCreator", fields: [creatorId], references: [id])
+  subscriptions VipSubscription[]
+  
+  @@index([creatorId])
+  @@index([isActive])
+}
+
+// Sistema VIP - Assinaturas VIP
+model VipSubscription {
+  id          String   @id @default(auto()) @map("_id") @db.ObjectId
+  subscriberId String  @db.ObjectId
+  planId      String   @db.ObjectId
+  paymentType String   // "money" ou "credits"
+  amount      Float    // Valor pago
+  startDate   DateTime @default(now())
+  endDate     DateTime
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  
+  subscriber  User     @relation("VipSubscriptionSubscriber", fields: [subscriberId], references: [id])
+  plan        VipPlan  @relation(fields: [planId], references: [id])
+  
+  @@unique([subscriberId, planId]) // Um usuário só pode ter uma assinatura ativa por plano
+  @@index([subscriberId])
+  @@index([planId])
+  @@index([isActive])
+}
+
+// Sistema VIP - Posts Pagos
+model PaidPost {
+  id          String   @id @default(auto()) @map("_id") @db.ObjectId
+  postId      String   @unique @db.ObjectId
+  creatorId   String   @db.ObjectId
+  price       Float    // Preço em reais
+  priceCredits Int     // Preço em créditos
+  description String   // Descrição do que o usuário vai ver
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @default(now())
+  
+  post        Post     @relation(fields: [postId], references: [id])
+  creator     User     @relation("PaidPostCreator", fields: [creatorId], references: [id])
+  accesses    PaidPostAccess[]
+  
+  @@index([creatorId])
+  @@index([isActive])
+}
+
+// Sistema VIP - Acesso a Posts Pagos
+model PaidPostAccess {
+  id          String   @id @default(auto()) @map("_id") @db.ObjectId
+  userId      String   @db.ObjectId
+  paidPostId  String   @db.ObjectId
+  paymentType String   // "money" ou "credits"
+  amount      Float    // Valor pago
+  accessDate  DateTime @default(now())
+  
+  user        User     @relation("PaidPostAccessUser", fields: [userId], references: [id])
+  paidPost    PaidPost @relation(fields: [paidPostId], references: [id])
+  
+  @@unique([userId, paidPostId]) // Um usuário só pode comprar acesso uma vez
+  @@index([userId])
+  @@index([paidPostId])
+}
+
+// Sistema de Visitas aos Perfis
+model Visit {
+  id          String   @id @default(auto()) @map("_id") @db.ObjectId
+  visitorId   String   @db.ObjectId
+  visitedId   String   @db.ObjectId
+  visitedAt   DateTime @default(now())
+  
+  visitor     User     @relation("ProfileVisitors", fields: [visitorId], references: [id])
+  visited     User     @relation("ProfileVisited", fields: [visitedId], references: [id])
+  
+  @@unique([visitorId, visitedId]) // Evita visitas duplicadas do mesmo usuário
+  @@index([visitorId])
+  @@index([visitedId])
+  @@index([visitedAt])
+  @@map("visits")
+}
+
+// Configurações do Sistema
+model SystemConfig {
+  id          String   @id @default(auto()) @map("_id") @db.ObjectId
+  key         String   @unique // Chave única da configuração
+  value       String   // Valor da configuração (JSON string)
+  description String?  // Descrição da configuração
+  updatedAt   DateTime @default(now())
+  updatedBy   String?  @db.ObjectId // ID do admin que atualizou
+  
+  @@map("system_configs")
+}
