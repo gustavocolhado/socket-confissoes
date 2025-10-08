@@ -884,7 +884,7 @@ io.on('connection', (socket) => {
   });
 });
 
-server.listen(PORT, () => {
+server.listen(PORT, '0.0.0.0', () => {
   console.log(`Servidor WebSocket rodando na porta ${PORT} em modo ${NODE_ENV}`);
   console.log(`CORS configurado para: ${corsOrigins.join(', ')}`);
 });
