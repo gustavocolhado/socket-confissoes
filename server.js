@@ -14,7 +14,81 @@ console.log('  NEXTAUTH_URL:', process.env.NEXTAUTH_URL ? '✅ Definida' : '❌ 
 const PORT = process.env.SOCKET_PORT || 4000;
 const NODE_ENV = process.env.NODE_ENV || 'development';
 
-let server = http.createServer();
+/** Mesma chave que `DIRECT_MESSAGES_POLICY_KEY` em src/lib/system-config.ts */
+const DIRECT_MESSAGES_POLICY_KEY = 'direct_messages_policy';
+
+async function getDirectMessagesPolicy() {
+  try {
+    const row = await prisma.systemConfig.findUnique({
+      where: { key: DIRECT_MESSAGES_POLICY_KEY },
+    });
+    const v = (row?.value || '').trim().toLowerCase();
+    if (v === 'all') return 'all';
+  } catch (e) {
+    console.error('[direct_messages_policy]', e);
+  }
+  return 'premium_only';
+}
+
+/** Conexões WebSocket que ainda não emitiram authenticate (visitantes). */
+const anonymousSockets = new Set();
+
+const SOCKET_PRESENCE_SECRET = process.env.SOCKET_PRESENCE_SECRET || '';
+
+function serializeConnectedUsers() {
+  return connectedUsers.map((user) => ({
+    id: user.userId,
+    username: user.username,
+    image: user.image,
+    city: user.city,
+    socketId: user.socketId,
+    followersCount: user.followers?.length || 0,
+    connectedAt: user.connectedAt?.toISOString?.() ?? null,
+  }));
+}
+
+function handlePresenceHttp(req, res) {
+  const rawUrl = req.url || '/';
+  const pathOnly = rawUrl.split('?')[0];
+  if (pathOnly !== '/presence' || req.method !== 'GET') {
+    return false;
+  }
+
+  // Aceita Authorization: Bearer <secret> ou ?token= (útil para diagnóstico)
+  let token = '';
+  const auth = req.headers.authorization;
+  if (auth && auth.startsWith('Bearer ')) token = auth.slice(7).trim();
+  if (!token) {
+    try {
+      const qs = rawUrl.includes('?') ? rawUrl.split('?')[1] : '';
+      token = new URLSearchParams(qs).get('token') || '';
+    } catch (_) {}
+  }
+
+  if (!SOCKET_PRESENCE_SECRET || token !== SOCKET_PRESENCE_SECRET) {
+    res.writeHead(401, { 'Content-Type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify({ error: 'Unauthorized' }));
+    return true;
+  }
+
+  const payload = JSON.stringify({
+    registeredCount: connectedUsers.length,
+    guestCount: anonymousSockets.size,
+    users: serializeConnectedUsers(),
+  });
+  res.writeHead(200, {
+    'Content-Type': 'application/json; charset=utf-8',
+    'Cache-Control': 'no-store',
+  });
+  res.end(payload);
+  return true;
+}
+
+let server = http.createServer((req, res) => {
+  if (handlePresenceHttp(req, res)) return;
+  res.writeHead(404);
+  res.end();
+});
 console.log('Servidor HTTP configurado (Coolify gerenciará HTTPS)');
 
 // Configuração do CORS baseada no ambiente
@@ -84,8 +158,11 @@ const sendNotification = (userId, notification) => {
 
 io.on('connection', (socket) => {
   console.log('Conexão WebSocket estabelecida:', socket.id);
+  anonymousSockets.add(socket.id);
 
   socket.on('authenticate', async (data) => {
+    anonymousSockets.delete(socket.id);
+
     const { userId } = data;
     
     console.log('🔐 Tentativa de autenticação para userId:', userId);
@@ -155,6 +232,9 @@ io.on('connection', (socket) => {
             ...user,
             connectedAt: new Date(),
           });
+
+          /* Sala por userId — necessário para io.to(receiverId).emit em mensagens diretas */
+          socket.join(user.id);
 
           console.log(`✅ Usuário ${user.username} autenticado. Total de usuários conectados: ${connectedUsers.length}`);
 
@@ -757,38 +837,51 @@ io.on('connection', (socket) => {
         return;
       }
 
-      // Se o remetente não é premium, verificar se o destinatário é premium
-      // e se ele já enviou uma mensagem para o remetente
-      if (!sender.premium) {
+      const dmPolicy = await getDirectMessagesPolicy();
+
+      if (dmPolicy === 'premium_only') {
+        // Se o remetente não é premium, verificar se o destinatário é premium
+        // e se ele já enviou uma mensagem para o remetente
+        if (!sender.premium) {
+          const receiver = await prisma.user.findUnique({
+            where: { id: receiverId },
+            select: { premium: true },
+          });
+
+          if (!receiver) {
+            socket.emit('error', { message: 'Usuário destinatário não encontrado.' });
+            return;
+          }
+
+          if (!receiver.premium) {
+            socket.emit('error', {
+              message: 'Apenas usuários premium podem iniciar mensagens diretas.',
+            });
+            return;
+          }
+
+          // Verificar se o destinatário (premium) já enviou uma mensagem para o remetente
+          const existingMessage = await prisma.message.findFirst({
+            where: {
+              senderId: receiverId,
+              receiverId: senderId,
+            },
+          });
+
+          if (!existingMessage) {
+            socket.emit('error', {
+              message: 'Apenas usuários premium podem iniciar mensagens diretas.',
+            });
+            return;
+          }
+        }
+      } else {
         const receiver = await prisma.user.findUnique({
           where: { id: receiverId },
-          select: { premium: true },
+          select: { id: true },
         });
-
         if (!receiver) {
           socket.emit('error', { message: 'Usuário destinatário não encontrado.' });
-          return;
-        }
-
-        if (!receiver.premium) {
-          socket.emit('error', {
-            message: 'Apenas usuários premium podem iniciar mensagens diretas.',
-          });
-          return;
-        }
-
-        // Verificar se o destinatário (premium) já enviou uma mensagem para o remetente
-        const existingMessage = await prisma.message.findFirst({
-          where: {
-            senderId: receiverId,
-            receiverId: senderId,
-          },
-        });
-
-        if (!existingMessage) {
-          socket.emit('error', {
-            message: 'Apenas usuários premium podem iniciar mensagens diretas.',
-          });
           return;
         }
       }
@@ -815,6 +908,7 @@ io.on('connection', (socket) => {
 
   socket.on('disconnect', () => {
     console.log('Usuário desconectado:', socket.id);
+    anonymousSockets.delete(socket.id);
 
     // Remover usuário da lista de conectados
     const disconnectedUser = connectedUsers.find(user => user.socketId === socket.id);
