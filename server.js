@@ -91,25 +91,43 @@ let server = http.createServer((req, res) => {
 });
 console.log('Servidor HTTP configurado (Coolify gerenciará HTTPS)');
 
-// Configuração do CORS baseada no ambiente
-const corsOrigins = process.env.CORS_ORIGINS ? process.env.CORS_ORIGINS.split(',') : [
-  'http://localhost:3000', 
-  'http://127.0.0.1:3000',
-  'http://192.168.3.16:3000',
-  'http://192.168.3.16:4000',
-  'http://192.168.1.100:3000',
-  'http://192.168.1.101:3000',
-  'http://10.0.0.1:3000',
-  'http://172.16.0.1:3000',
-  'http://medias.confissoesdecorno.com',
-  'https://confissoesdecorno.com', 
-  'https://socket.confissoesdecorno.com', 
-  'http://medias.confissoesdecorno.com'
-];
+// Configuração do CORS: lista explícita + em desenvolvimento aceita qualquer origem (LAN no telemóvel).
+const corsOrigins = process.env.CORS_ORIGINS
+  ? process.env.CORS_ORIGINS.split(',').map((s) => s.trim()).filter(Boolean)
+  : [
+      'http://localhost:3000',
+      'http://127.0.0.1:3000',
+      'http://192.168.3.16:3000',
+      'http://192.168.3.16:4000',
+      'http://192.168.1.100:3000',
+      'http://192.168.1.101:3000',
+      'http://10.0.0.1:3000',
+      'http://172.16.0.1:3000',
+      'http://medias.confissoesdecorno.com',
+      'https://confissoesdecorno.com',
+      'https://socket.confissoesdecorno.com',
+      'http://medias.confissoesdecorno.com',
+    ];
+
+function socketCorsOrigin(origin, callback) {
+  if (!origin) {
+    callback(null, true);
+    return;
+  }
+  if (corsOrigins.includes(origin)) {
+    callback(null, true);
+    return;
+  }
+  if (NODE_ENV !== 'production') {
+    callback(null, true);
+    return;
+  }
+  callback(new Error('Not allowed by CORS'));
+}
 
 const io = socketIo(server, {
   cors: {
-    origin: corsOrigins,
+    origin: socketCorsOrigin,
     methods: ['GET', 'POST'],
     credentials: true
   },
